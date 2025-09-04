@@ -17,22 +17,20 @@ class PgSession:
         self.cur = self.conn.cursor()
         return self
 
-def __exit__(self, exc_type, exc, tb):
-    if exc:
-        self.conn.rollback()
-    else:
-        self.conn.commit()
+    def __exit__(self, exc_type, exc, tb):
+        if exc:
+            self.conn.rollback()
+        else:
+            self.conn.commit()
         self.cur.close()
         POOL.putconn(self.conn)
 
+    def call(self, fn: str, params: tuple = ()): # devuelve first row
+        self.cur.execute(f"SELECT * FROM {fn}({', '.join(['%s']*len(params))});", params)
+        try:
+            return self.cur.fetchone()
+        except Exception:
+            return None
 
-def call(self, fn: str, params: tuple = ()): # devuelve first row
-    self.cur.execute(f"SELECT * FROM {fn}({', '.join(['%s']*len(params))});", params)
-    try:
-        return self.cur.fetchone()
-    except Exception:
-        return None
-
-
-def call_void(self, fn: str, params: tuple = ()): # para VOID
-    self.cur.execute(f"SELECT {fn}({', '.join(['%s']*len(params))});", params)
+    def call_void(self, fn: str, params: tuple = ()): # para VOID
+        self.cur.execute(f"SELECT {fn}({', '.join(['%s']*len(params))});", params)

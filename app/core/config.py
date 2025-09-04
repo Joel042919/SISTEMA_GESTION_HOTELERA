@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     DB_DSN: str = Field(default="postgresql://user:pass@localhost:5432/dbname",alias="DATABASE_URL")
     SECRET_KEY: str = Field(default="change-me")
     DEBUG: bool = Field(default=False)
+    default_property_id: str = Field(default="00000000-0000-0000-0000-000000000000")
     
      # Configuración de carga de .env (opcional)
     model_config = SettingsConfigDict(

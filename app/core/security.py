@@ -1,9 +1,12 @@
-from passlib.hash import pbkdf2_sha256
+import bcrypt
 
 
 def hash_password(plainPassword: str) -> str:
-    return pbkdf2_sha256.hash(plainPassword)
+    """Hash a password using bcrypt"""
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(plainPassword.encode('utf-8'), salt).decode('utf-8')
 
 
 def verify_password(plainPassword: str, hashed_password: str) -> bool:
-    return pbkdf2_sha256.verify(plainPassword,hashed_password)
+    """Verify a password against its hash using bcrypt"""
+    return bcrypt.checkpw(plainPassword.encode('utf-8'), hashed_password.encode('utf-8'))

@@ -14,7 +14,7 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO audit_log(entity, entity_id, action, diff_json, user_id)
+  INSERT INTO pms.audit_log(entity, entity_id, action, diff_json, user_id)
   VALUES (p_entity, p_entity_id, p_action, p_diff, p_user);
 END;
 $$;
@@ -61,8 +61,8 @@ BEGIN
 
   SELECT r.base_rate, r.currency, r.weekend_multiplier, t.rate
   INTO v_rate
-  FROM rates r
-  JOIN tax_codes t ON t.code = r.tax_code
+  FROM pms.rates r
+  JOIN pms.tax_codes t ON t.code = r.tax_code
   WHERE r.property_id = p_property
     AND r.room_type_id = p_room_type
     AND r.active
@@ -80,7 +80,7 @@ BEGIN
   IF p_promo IS NOT NULL THEN
     SELECT COALESCE(percent_off,0), COALESCE(amount_off,0)
     INTO v_promo_pct, v_promo_amt
-    FROM promos
+    FROM pms.promos
     WHERE property_id = p_property
       AND code = p_promo
       AND active
@@ -96,7 +96,7 @@ BEGIN
     -- Temporada
     SELECT COALESCE(MAX(multiplier), 1.0)
     INTO v_multiplier
-    FROM rate_seasons
+    FROM pms.rate_seasons
     WHERE property_id = p_property
       AND v_date BETWEEN start_date AND end_date;
 
@@ -181,7 +181,7 @@ BEGIN
   INTO v_tot
   FROM sp_quote_price(p_property, p_room_type, v_start, v_end, 1, p_promo);
 
-  UPDATE reservations SET total_amount = v_tot WHERE id = v_res;
+  UPDATE pms.reservations SET total_amount = v_tot WHERE id = v_res;
 
   RETURN v_res;
 END;
@@ -203,7 +203,7 @@ DECLARE
   v_overlap INT;
 BEGIN
   SELECT * INTO v_res
-  FROM reservations
+  FROM pms.reservations
   WHERE id = p_res
   FOR UPDATE;
 
@@ -213,8 +213,8 @@ BEGIN
 
   -- Verificar solapamiento
   SELECT COUNT(*) INTO v_overlap
-  FROM reservation_rooms rr
-  JOIN reservations r ON r.id = rr.reservation_id
+  FROM pms.reservation_rooms rr
+  JOIN pms.reservations r ON r.id = rr.reservation_id
   WHERE rr.room_id = p_room
     AND r.status IN ('pending','confirmed','checked_in')
     AND daterange(r.start_date, r.end_date, '[]')
@@ -224,14 +224,14 @@ BEGIN
     RAISE EXCEPTION 'ROOM_OVERLAP' USING ERRCODE='P0001';
   END IF;
 
-  INSERT INTO reservation_rooms(reservation_id, room_id)
+  INSERT INTO pms.reservation_rooms(reservation_id, room_id)
   VALUES (p_res, p_room)
   ON CONFLICT (reservation_id) DO UPDATE SET room_id = EXCLUDED.room_id;
 
-  UPDATE rooms SET status = 'occupied' WHERE id = p_room;
+  UPDATE pms.rooms SET status = 'occupied' WHERE id = p_room;
 
-  INSERT INTO room_status_history(room_id, old_status, new_status, changed_by)
-  SELECT id, NULL, 'occupied', p_user FROM rooms WHERE id = p_room;
+  INSERT INTO pms.room_status_history(room_id, old_status, new_status, changed_by)
+  SELECT id, NULL, 'occupied', p_user FROM pms.rooms WHERE id = p_room;
 
   PERFORM sp_audit_write(
     'reservation_rooms', p_room, 'assign',
@@ -255,14 +255,14 @@ AS $$
 DECLARE
   v_room UUID;
 BEGIN
-  UPDATE reservations SET status='canceled' WHERE id = p_res;
+  UPDATE pms.reservations SET status='canceled' WHERE id = p_res;
 
   SELECT room_id INTO v_room
-  FROM reservation_rooms
+  FROM pms.reservation_rooms
   WHERE reservation_id = p_res;
 
   IF v_room IS NOT NULL THEN
-    UPDATE rooms SET status='available' WHERE id = v_room;
+    UPDATE pms.rooms SET status='available' WHERE id = v_room;
   END IF;
 
   PERFORM sp_audit_write(
@@ -285,7 +285,7 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  UPDATE reservations SET status='checked_in' WHERE id = p_res;
+  UPDATE pms.reservations SET status='checked_in' WHERE id = p_res;
 
   PERFORM sp_audit_write(
     'reservations', p_res, 'checkin',
@@ -370,21 +370,21 @@ BEGIN
   -- Recalcula con cargos del periodo (demo simple: suma de charges)
   SELECT COALESCE(SUM(amount),0)
   INTO v_total
-  FROM charges
+  FROM pms.charges
   WHERE reservation_id = p_res;
 
   -- IGV asociado a la tarifa del room_type activo
   SELECT ROUND(v_total * (t.rate/100.0), 2)
   INTO v_tax
-  FROM reservations r
-  JOIN rates ra ON ra.property_id = r.property_id
+  FROM pms.reservations r
+  JOIN pms.rates ra ON ra.property_id = r.property_id
                AND ra.room_type_id = r.room_type_id
                AND ra.active
-  JOIN tax_codes t ON t.code = ra.tax_code
+  JOIN pms.tax_codes t ON t.code = ra.tax_code
   WHERE r.id = p_res
   LIMIT 1;
 
-  INSERT INTO invoices(reservation_id, number, amount, tax_amount, currency)
+  INSERT INTO pms.invoices(reservation_id, number, amount, tax_amount, currency)
   VALUES (
     p_res,
     CONCAT('F-', substr(replace(cast(gen_random_uuid() as text),'-',''),1,8)),
@@ -394,7 +394,7 @@ BEGIN
   )
   RETURNING id INTO v_invoice;
 
-  UPDATE reservations SET status='checked_out' WHERE id = p_res;
+  UPDATE pms.reservations SET status='checked_out' WHERE id = p_res;
 
   PERFORM sp_audit_write(
     'invoices', v_invoice, 'issue',
@@ -411,23 +411,23 @@ $$;
 -- =========================================
 CREATE OR REPLACE FUNCTION sp_set_room_status(
   p_room UUID,
-  p_status room_status,
+  p_status pms.room_status,
   p_user UUID
 )
 RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_old room_status;
+  v_old pms.room_status;
 BEGIN
   SELECT status INTO v_old
-  FROM rooms
+  FROM pms.rooms
   WHERE id = p_room
   FOR UPDATE;
 
-  UPDATE rooms SET status = p_status WHERE id = p_room;
+  UPDATE pms.rooms SET status = p_status WHERE id = p_room;
 
-  INSERT INTO room_status_history(room_id, old_status, new_status, changed_by)
+  INSERT INTO pms.room_status_history(room_id, old_status, new_status, changed_by)
   VALUES (p_room, v_old, p_status, p_user);
 
   PERFORM sp_audit_write(
@@ -456,19 +456,19 @@ DECLARE
 BEGIN
   SELECT COALESCE(SUM(amount),0)
   INTO v_pay
-  FROM payments pa
-  JOIN reservations r ON r.id = pa.reservation_id
+  FROM pms.payments pa
+  JOIN pms.reservations r ON r.id = pa.reservation_id
   WHERE r.property_id = p_property
     AND DATE(pa.paid_at) = p_date;
 
   SELECT COALESCE(SUM(amount),0)
   INTO v_inv
-  FROM invoices i
-  JOIN reservations r ON r.id = i.reservation_id
+  FROM pms.invoices i
+  JOIN pms.reservations r ON r.id = i.reservation_id
   WHERE r.property_id = p_property
     AND DATE(i.issued_at) = p_date;
 
-  INSERT INTO cash_closures(property_id, date, closed_by, total_payments, total_invoices)
+  INSERT INTO pms.cash_closures(property_id, date, closed_by, total_payments, total_invoices)
   VALUES (p_property, p_date, p_user, v_pay, v_inv)
   RETURNING id INTO v_id;
 
@@ -507,12 +507,12 @@ DECLARE
   v_adr NUMERIC;
 BEGIN
   SELECT COUNT(*) INTO v_rt
-  FROM rooms
+  FROM pms.rooms
   WHERE property_id = p_property;
 
   SELECT COUNT(*) INTO v_ro
-  FROM reservations r
-  JOIN reservation_rooms rr ON rr.reservation_id = r.id
+  FROM pms.reservations r
+  JOIN pms.reservation_rooms rr ON rr.reservation_id = r.id
   WHERE r.property_id = p_property
     AND p_date >= r.start_date
     AND p_date < r.end_date
@@ -520,8 +520,8 @@ BEGIN
 
   SELECT COALESCE(SUM(amount),0)
   INTO v_rev
-  FROM charges c
-  JOIN reservations r ON r.id = c.reservation_id
+  FROM pms.charges c
+  JOIN pms.reservations r ON r.id = c.reservation_id
   WHERE r.property_id = p_property
     AND DATE(c.posted_at) = p_date;
 

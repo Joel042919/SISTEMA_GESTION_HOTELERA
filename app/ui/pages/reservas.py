@@ -13,10 +13,15 @@ svc = ReservationsService(PgRepo())
 
 st.header("Reservas")
 with st.form("quote_form"):
-    room_type_id = st.text_input("Room Type ID", placeholder="UUID del tipo de habitación (usar seed)")
+    # UUID del room_type Standard obtenido de la base de datos
+    room_type_id = st.selectbox(
+        "Tipo de Habitación", 
+        options=["a47f584d-8ddb-494d-adbb-d17ef1212632"],
+        format_func=lambda x: "Standard" if x == "a47f584d-8ddb-494d-adbb-d17ef1212632" else x
+    )
     start = st.date_input("Inicio", value=date.today())
     end = st.date_input("Fin", value=date.today()+timedelta(days=1))
-    promo = st.text_input("Código promo", placeholder="Opcional")
+    promo = st.text_input("Código promo", placeholder="Opcional (ej: BIENVENIDA)")
     guests = st.number_input("Huéspedes", 1, 6, 1)
     do_quote = st.form_submit_button("Cotizar")
 
@@ -31,10 +36,15 @@ if do_quote and room_type_id:
 st.subheader("Crear reserva")
 with st.form("create_form"):
     guest_id = st.text_input("Guest ID", placeholder="UUID de huésped (crea en Admin/Clientes)")
-    room_type_id2 = st.text_input("Room Type ID", placeholder="UUID")
-    start2 = st.date_input("Inicio R", value=date.today(), key="s2")
-    end2 = st.date_input("Fin R", value=date.today()+timedelta(days=1), key="e2")
-    promo2 = st.text_input("Código promo R", placeholder="Opcional")
+    room_type_id2 = st.selectbox(
+        "Tipo de Habitación", 
+        options=["a47f584d-8ddb-494d-adbb-d17ef1212632"],
+        format_func=lambda x: "Standard" if x == "a47f584d-8ddb-494d-adbb-d17ef1212632" else x,
+        key="room_type_2"
+    )
+    start2 = st.date_input("Inicio", value=date.today(), key="s2")
+    end2 = st.date_input("Fin", value=date.today()+timedelta(days=1), key="e2")
+    promo2 = st.text_input("Código promo", placeholder="Opcional (ej: BIENVENIDA)", key="promo2")
     submit = st.form_submit_button("Crear y Confirmar")
 
 
