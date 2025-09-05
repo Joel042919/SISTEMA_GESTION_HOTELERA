@@ -1,8 +1,10 @@
 from app.core.db import PgSession
+from typing import Optional,List
+
 
 
 class PgRepo:
-    def quote_price(self, property_id:str, room_type_id:str, start:str, end:str, guests:int, promo:str|None):
+    def quote_price(self, property_id:str, room_type_id:str, start:str, end:str, guests:int, promo:Optional[str]):
         with PgSession() as db:
             row = db.call('pms.sp_quote_price', (property_id, room_type_id, start, end, guests, promo))
             if not row:
@@ -13,7 +15,7 @@ class PgRepo:
         }
 
 
-    def create_reservation(self, property_id:str, guest_id:str, room_type_id:str, dates:list[str], promo:str|None, user_id:str)->str:
+    def create_reservation(self, property_id:str, guest_id:str, room_type_id:str, dates:List[str], promo:Optional[str], user_id:str)->str:
         with PgSession() as db:
             row = db.call('pms.sp_create_reservation', (property_id, guest_id, room_type_id, dates, promo, user_id))
             return row[0]
