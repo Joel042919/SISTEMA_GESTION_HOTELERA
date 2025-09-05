@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     #db_user: str = "postgres"
     #db_password: str = "maria042919"
     #app_secret: str = "change-me"
-    #default_property_id: str = "00000000-0000-0000-0000-000000000000"
+    default_property_id: str = "00000000-0000-0000-0000-000000000000"
     # Ejemplos de variables (ajusta a lo tuyo)
     DB_DSN: str = Field(default="postgresql://user:pass@localhost:5432/dbname",alias="DATABASE_URL")
     SECRET_KEY: str = Field(default="change-me")

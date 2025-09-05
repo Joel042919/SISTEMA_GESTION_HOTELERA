@@ -30,8 +30,9 @@ WHERE r.name='Administrador'
 ON CONFLICT DO NOTHING;
 
 -- Usuario admin demo (bcrypt("admin123"))
+  --generar password python -c "from passlib.hash import pbkdf2_sha256; print(pbkdf2_sha256.hash('admin123'))"
 INSERT INTO users (email, full_name, password_hash)
-VALUES ('admin@demo.local','Admin Demo', '$2b$12$JXw8rQ0JwZxD1hJ9hG0s2e9q2uVq8sJw9tA6xJ1cQ2jS9c0vN6b7e')
+VALUES ('admin@demo.local','Admin Demo', '$pbkdf2-sha256$29000$vve.VwpBSMl57x2DsFZKiQ$lQOMVPi68NgsmYUrtPcVPSrMp8h8Xyv7sM0ic2L6x8A')
 ON CONFLICT DO NOTHING;
 
 -- Asignar rol admin a la propiedad demo

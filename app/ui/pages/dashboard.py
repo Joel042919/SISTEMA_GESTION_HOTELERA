@@ -20,7 +20,7 @@ report = svc.daily(u['property_id'], date.today().isoformat())
 
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Ocupación", f"{report['occupancy_pct']}%", help="% habitaciones ocupadas hoy")
-k2.metric("Ingresos del día", f"{report['revenue']} {"PEN"}")
+k2.metric("Ingresos del día", f"{report['revenue']} PEN")
 k3.metric("ADR", f"{report['adr']}")
 k4.metric("RevPAR", f"{report['revpar']}")
 

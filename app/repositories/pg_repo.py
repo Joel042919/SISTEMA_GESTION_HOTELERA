@@ -1,5 +1,5 @@
 from app.core.db import PgSession
-from typing import Optional,List
+from typing import Optional,List,Tuple
 
 
 
@@ -10,9 +10,9 @@ class PgRepo:
             if not row:
                 return None
             return {
-            'nights': row[0], 'base_total': float(row[1] or 0), 'promo_discount': float(row[2] or 0),
-            'tax_total': float(row[3] or 0), 'grand_total': float(row[4] or 0), 'nightly': row[5]
-        }
+                'nights': row[0], 'base_total': float(row[1] or 0), 'promo_discount': float(row[2] or 0),
+                'tax_total': float(row[3] or 0), 'grand_total': float(row[4] or 0), 'nightly': row[5]
+            }
 
 
     def create_reservation(self, property_id:str, guest_id:str, room_type_id:str, dates:List[str], promo:Optional[str], user_id:str)->str:
@@ -55,3 +55,20 @@ class PgRepo:
             'occupancy_pct': float(row[3] or 0), 'revenue': float(row[4] or 0),
             'adr': float(row[5] or 0), 'revpar': float(row[6] or 0)
             }
+            
+    def list_room_types(self,property_id:str)->List[Tuple[str,str]]:
+        """
+        Devuelve lista [(id, name)] de tipos de habitación de la propiedad.
+        """
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT id::text, name
+                FROM pms.room_types
+                WHERE property_id = %s
+                ORDER BY name
+                """,
+                (property_id,)
+            )
+            rows = db.cur.fetchall() or []
+            return [(r[0], r[1]) for r in rows]
