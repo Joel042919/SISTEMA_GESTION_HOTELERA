@@ -17,7 +17,7 @@ ON CONFLICT DO NOTHING;
 
 -- Permisos (ejemplos)
 INSERT INTO permissions (name) VALUES
-  ('reservations.create'),('reservations.view'),('reservations.cancel'),('reservations.assign_room'),
+  ('reservations.create'),('reservations.view'),('reservations.list'),('reservations.update'),('reservations.cancel'),('reservations.assign_room'),
   ('billing.view'),('billing.charge'),('billing.pay'),('billing.close_cash'),
   ('rooms.view'),('rooms.update_status'),('reports.view'),('users.manage')
 ON CONFLICT DO NOTHING;
@@ -91,4 +91,11 @@ ON CONFLICT DO NOTHING;
 -- Promo demo
 INSERT INTO promos (property_id, code, description, percent_off, start_date, end_date, active)
 VALUES ('00000000-0000-0000-0000-000000000000','BIENVENIDA','Promo bienvenida',10,'2025-01-01','2025-12-31', TRUE)
+ON CONFLICT DO NOTHING;
+
+-- Huéspedes demo
+INSERT INTO guests (id, full_name, email, phone, preferences) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'Juan Pérez', 'juan.perez@email.com', '+51987654321', '{"room_preference": "vista_mar"}'),
+  ('22222222-2222-2222-2222-222222222222', 'María García', 'maria.garcia@email.com', '+51987654322', '{"dietary_restrictions": "vegetariano"}'),
+  ('33333333-3333-3333-3333-333333333333', 'Carlos López', 'carlos.lopez@email.com', '+51987654323', '{"special_requests": "cama_extra"}')
 ON CONFLICT DO NOTHING;

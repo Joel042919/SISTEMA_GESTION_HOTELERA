@@ -64,6 +64,7 @@ st.caption("Dashboard de KPIs y navegación por páginas (ver carpeta pages)")
 
 st.page_link("pages/dashboard.py", label="Dashboard", icon="📊")
 st.page_link("pages/reservas.py", label="Reservas", icon="🗓️")
+st.page_link("pages/huespedes.py", label="Huéspedes", icon="🧑‍🤝‍🧑")
 st.page_link("pages/checkIn_checkOut.py", label="Check-in/Check-out", icon="🧾")
 st.page_link("pages/habitaciones.py", label="Habitaciones", icon="🛏️")
 st.page_link("pages/houseKeeping.py", label="Housekeeping", icon="🧹")

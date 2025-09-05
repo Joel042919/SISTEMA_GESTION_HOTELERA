@@ -15,6 +15,8 @@ class PgSession:
     def __enter__(self):
         self.conn = POOL.getconn()
         self.cur = self.conn.cursor()
+        # Establecer el search_path para usar el esquema pms
+        self.cur.execute("SET search_path TO pms, public;")
         return self
 
     def __exit__(self, exc_type, exc, tb):

@@ -20,6 +20,280 @@ END;
 $$;
 
 -- =========================================
+-- Actualización y gestión de reservas
+-- =========================================
+
+-- Actualizar información de una reserva
+CREATE OR REPLACE FUNCTION sp_update_reservation(
+  p_reservation_id UUID,
+  p_user_id UUID,
+  p_start_date DATE DEFAULT NULL,
+  p_end_date DATE DEFAULT NULL,
+  p_promo_code TEXT DEFAULT NULL
+) RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_old_record RECORD;
+  v_changes JSONB := '{}'::jsonb;
+  v_new_total NUMERIC;
+BEGIN
+  -- Obtener registro actual
+  SELECT start_date, end_date, promo_code, room_type_id, property_id
+  INTO v_old_record
+  FROM reservations
+  WHERE id = p_reservation_id;
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'RESERVATION_NOT_FOUND' USING ERRCODE='P0001';
+  END IF;
+  
+  -- Construir objeto de cambios
+  IF p_start_date IS NOT NULL AND p_start_date != v_old_record.start_date THEN
+    v_changes := v_changes || jsonb_build_object('start_date', jsonb_build_object('old', v_old_record.start_date, 'new', p_start_date));
+  END IF;
+  
+  IF p_end_date IS NOT NULL AND p_end_date != v_old_record.end_date THEN
+    v_changes := v_changes || jsonb_build_object('end_date', jsonb_build_object('old', v_old_record.end_date, 'new', p_end_date));
+  END IF;
+  
+  IF p_promo_code IS NOT NULL AND p_promo_code != COALESCE(v_old_record.promo_code, '') THEN
+    v_changes := v_changes || jsonb_build_object('promo_code', jsonb_build_object('old', v_old_record.promo_code, 'new', p_promo_code));
+  END IF;
+  
+  -- Actualizar solo los campos que cambiaron
+  UPDATE reservations
+  SET 
+    start_date = COALESCE(p_start_date, start_date),
+    end_date = COALESCE(p_end_date, end_date),
+    promo_code = CASE WHEN p_promo_code IS NOT NULL THEN p_promo_code ELSE promo_code END
+  WHERE id = p_reservation_id;
+  
+  -- Recalcular total si cambiaron fechas o promo
+  IF p_start_date IS NOT NULL OR p_end_date IS NOT NULL OR p_promo_code IS NOT NULL THEN
+    SELECT grand_total
+    INTO v_new_total
+    FROM sp_quote_price(
+      v_old_record.property_id, 
+      v_old_record.room_type_id, 
+      COALESCE(p_start_date, v_old_record.start_date),
+      COALESCE(p_end_date, v_old_record.end_date),
+      1, 
+      CASE WHEN p_promo_code IS NOT NULL THEN p_promo_code ELSE v_old_record.promo_code END
+    );
+    
+    UPDATE reservations SET total_amount = v_new_total WHERE id = p_reservation_id;
+    v_changes := v_changes || jsonb_build_object('total_amount', v_new_total);
+  END IF;
+  
+  -- Registrar auditoría
+  IF v_changes != '{}'::jsonb THEN
+    PERFORM sp_audit_write(
+      'reservations', p_reservation_id, 'update',
+      v_changes,
+      p_user_id
+    );
+  END IF;
+END;
+$$;
+
+-- Cambiar estado de una reserva
+CREATE OR REPLACE FUNCTION sp_update_reservation_status(
+  p_reservation_id UUID,
+  p_new_status reservation_status,
+  p_user_id UUID,
+  p_notes TEXT DEFAULT NULL
+) RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_old_status reservation_status;
+  v_room_id UUID;
+BEGIN
+  -- Obtener estado actual
+  SELECT status INTO v_old_status
+  FROM reservations
+  WHERE id = p_reservation_id;
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'RESERVATION_NOT_FOUND' USING ERRCODE='P0001';
+  END IF;
+  
+  -- No hacer nada si el estado es el mismo
+  IF v_old_status = p_new_status THEN
+    RETURN;
+  END IF;
+  
+  -- Validar transiciones de estado
+  IF v_old_status = 'canceled' AND p_new_status != 'canceled' THEN
+    RAISE EXCEPTION 'CANNOT_CHANGE_CANCELED_RESERVATION' USING ERRCODE='P0001';
+  END IF;
+  
+  IF v_old_status = 'checked_out' AND p_new_status NOT IN ('checked_out') THEN
+    RAISE EXCEPTION 'CANNOT_CHANGE_CHECKED_OUT_RESERVATION' USING ERRCODE='P0001';
+  END IF;
+  
+  -- Actualizar estado
+  UPDATE reservations
+  SET status = p_new_status
+  WHERE id = p_reservation_id;
+  
+  -- Manejar cambios en habitaciones según el estado
+  SELECT room_id INTO v_room_id
+  FROM reservation_rooms
+  WHERE reservation_id = p_reservation_id;
+  
+  IF v_room_id IS NOT NULL THEN
+    CASE p_new_status
+      WHEN 'canceled' THEN
+        UPDATE rooms SET status = 'available' WHERE id = v_room_id;
+      WHEN 'checked_in' THEN
+        UPDATE rooms SET status = 'occupied' WHERE id = v_room_id;
+      WHEN 'checked_out' THEN
+        UPDATE rooms SET status = 'dirty' WHERE id = v_room_id;
+      ELSE
+        -- Para confirmed, pending, no_show mantener el estado actual
+        NULL;
+    END CASE;
+  END IF;
+  
+  -- Registrar auditoría
+  PERFORM sp_audit_write(
+    'reservations', p_reservation_id, 'status_change',
+    jsonb_build_object(
+      'old_status', v_old_status,
+      'new_status', p_new_status,
+      'notes', p_notes
+    ),
+    p_user_id
+  );
+END;
+$$;
+
+-- =========================================
+-- Listado y consulta de reservas
+-- =========================================
+
+-- Listar reservas con filtros
+CREATE OR REPLACE FUNCTION sp_list_reservations(
+  p_property UUID,
+  p_start_date DATE DEFAULT NULL,
+  p_end_date DATE DEFAULT NULL,
+  p_status TEXT DEFAULT NULL,
+  p_guest_search TEXT DEFAULT NULL,
+  p_limit INT DEFAULT 50,
+  p_offset INT DEFAULT 0
+) RETURNS TABLE(
+  id UUID,
+  guest_name TEXT,
+  guest_email TEXT,
+  guest_phone TEXT,
+  room_type_name TEXT,
+  room_number TEXT,
+  start_date DATE,
+  end_date DATE,
+  status reservation_status,
+  total_amount NUMERIC,
+  deposit_amount NUMERIC,
+  promo_code TEXT,
+  created_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    r.id,
+    g.full_name,
+    g.email,
+    g.phone,
+    rt.name,
+    rm.code,
+    r.start_date,
+    r.end_date,
+    r.status,
+    r.total_amount,
+    r.deposit_amount,
+    r.promo_code,
+    r.created_at
+  FROM reservations r
+  JOIN guests g ON g.id = r.guest_id
+  JOIN room_types rt ON rt.id = r.room_type_id
+  LEFT JOIN reservation_rooms rr ON rr.reservation_id = r.id
+  LEFT JOIN rooms rm ON rm.id = rr.room_id
+  WHERE r.property_id = p_property
+    AND (p_start_date IS NULL OR r.start_date >= p_start_date)
+    AND (p_end_date IS NULL OR r.end_date <= p_end_date)
+    AND (p_status IS NULL OR r.status::TEXT = p_status)
+    AND (p_guest_search IS NULL OR 
+         g.full_name ILIKE '%' || p_guest_search || '%' OR
+         g.email ILIKE '%' || p_guest_search || '%' OR
+         g.phone ILIKE '%' || p_guest_search || '%')
+  ORDER BY r.created_at DESC
+  LIMIT p_limit OFFSET p_offset;
+END;
+$$;
+
+-- Obtener una reserva específica
+CREATE OR REPLACE FUNCTION sp_get_reservation(
+  p_reservation_id UUID
+) RETURNS TABLE(
+  id UUID,
+  property_id UUID,
+  guest_id UUID,
+  guest_name TEXT,
+  guest_email TEXT,
+  guest_phone TEXT,
+  guest_preferences JSONB,
+  room_type_id UUID,
+  room_type_name TEXT,
+  room_id UUID,
+  room_number TEXT,
+  start_date DATE,
+  end_date DATE,
+  status reservation_status,
+  total_amount NUMERIC,
+  deposit_amount NUMERIC,
+  promo_code TEXT,
+  currency TEXT,
+  created_by UUID,
+  created_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    r.id,
+    r.property_id,
+    r.guest_id,
+    g.full_name,
+    g.email,
+    g.phone,
+    g.preferences,
+    r.room_type_id,
+    rt.name,
+    rm.id,
+    rm.number,
+    r.start_date,
+    r.end_date,
+    r.status,
+    r.total_amount,
+    r.deposit_amount,
+    r.promo_code,
+    r.currency,
+    r.created_by,
+    r.created_at
+  FROM reservations r
+  JOIN guests g ON g.id = r.guest_id
+  JOIN room_types rt ON rt.id = r.room_type_id
+  LEFT JOIN reservation_rooms rr ON rr.reservation_id = r.id
+  LEFT JOIN rooms rm ON rm.id = rr.room_id
+  WHERE r.id = p_reservation_id;
+END;
+$$;
+
+-- =========================================
 -- Cotización
 -- =========================================
 CREATE OR REPLACE FUNCTION sp_quote_price(
