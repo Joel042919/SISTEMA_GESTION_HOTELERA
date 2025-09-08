@@ -21,6 +21,11 @@ class PgRepo:
             row = db.call('pms.sp_create_reservation', (property_id, guest_id, room_type_id, dates, promo, user_id))
             return row[0]
 
+    def create_guests(self,full_name:str,dni:str,phone:str,email:Optional[str],preferences:Optional[dict])->tuple[str,str]:
+        with PgSession() as db:
+            row = db.call('pms.sp_create_guests', (full_name, dni, phone, email, preferences))
+            return row
+
 
     def assign_room(self, reservation_id:str, room_id:str, user_id:str):
         with PgSession() as db:
@@ -74,7 +79,7 @@ class PgRepo:
             rows = db.cur.fetchall() or []
             return [(r[0], r[1]) for r in rows]
     
-    def list_rooms_available(self, property_id:str)->pd.DataFrame:
+    def list_rooms_available(self, property_id:str,startDate:str,endDate:str)->pd.DataFrame:
         """
         Devuelve lista [(id,code,type,capacity_adults,capacity_children,amenities)] de las habitaciones disponibles
         """
@@ -89,14 +94,21 @@ class PgRepo:
                        (rt.amenities)::text      AS amenities
                 FROM pms.rooms r
                 INNER JOIN pms.room_types rt ON r.room_type_id = rt.id
+                inner join pms.reservation_rooms rero on rero.room_id=r.id 
+                inner join pms.reservations res on res.id=rero.reservation_id
                 WHERE r.status = 'available'
-                  AND r.property_id = %s
+                  AND r.property_id = %s and not (res.end_date>=%s and res.start_date<=%s)
                 ORDER BY rt.name, r.code;
                 """,
-                (property_id,)
+                (property_id,startDate,endDate)
             )
             rows = db.cur.fetchall() or []
             df = pd.DataFrame(rows, columns=[
                 "id","code","type","capacity_adults","capacity_children","amenities"
             ])
             return df
+        
+    def search_guest_by_dni(self,dni:str)->Optional[tuple[str,str]]:
+        with PgSession() as db:
+            row = db.call('pms.search_guest_by_dni',(dni,))
+            return row
