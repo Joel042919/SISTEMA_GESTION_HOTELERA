@@ -9,7 +9,10 @@ class RoomsService:
     @policy_check('rooms.view')
     def list_room_types(self,property_id:str)->List[Tuple[str,str]]:
         return self.repo.list_room_types(property_id)
-
+    
+    @policy_check('rooms.viewAvailable')
+    def list_rooms_available(self,property_id:str)->List[Tuple[str,str]]:
+        return self.repo.list_rooms_available(property_id)
 
     @policy_check('rooms.update_status')
     def set_status(self, room_id, status, user_id):

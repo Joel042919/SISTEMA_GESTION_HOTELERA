@@ -5,6 +5,7 @@ from app.services.reservations import ReservationsService
 from app.repositories.pg_repo import PgRepo
 from app.auth.session import current_user
 from app.services.rooms import RoomsService
+import pandas as pd
 
 u = current_user()
 if not u:
@@ -22,7 +23,8 @@ def _get_room_type_options(property_id:str)->Dict[str,str]:
     Devuelve {label:id} para el selectBox
     """
     rows = svc_rooms.list_room_types(property_id)
-    return {name:rid for(rid, name) in rows}
+    
+    return {name: str(rid) for(rid, name) in rows}
 
 rt_options = _get_room_type_options(u['property_id'])
 
@@ -61,9 +63,44 @@ st.subheader("Crear reserva")
 with st.form("create_form"):
     label2 = st.selectbox("Tipo de habitación", list(rt_options.keys()), key="rt2")
     room_type_id2 = rt_options[label2]
+    
     guest_id = st.text_input("Guest ID", placeholder="UUID de huésped (crea en Admin/Clientes)")
     start2 = st.date_input("Inicio R", value=date.today(), key="s2")
     end2 = st.date_input("Fin R", value=date.today()+timedelta(days=1), key="e2")
+    
+    df_rooms = svc_rooms.list_rooms_available(u['property_id'])
+    
+    if df_rooms.empty:
+        st.info("No hya habitaciones disponibles")
+    else:
+        
+        df_view = df_rooms.copy()
+        df_view.set_index("id",inplace=True) #id como indice
+        df_view.insert(0,"☝️",False) # checkbox
+        
+        show_cols = ["☝️", "code", "type", "capacity_adults",
+                     "capacity_children", "amenities"]
+        
+        edited = st.data_editor(
+            df_view[show_cols],
+            hide_index=True,
+            use_container_width=True,  # para que no tome todo el ancho
+            height=280,                  # scroll vertical
+            column_config={
+                "☝️": st.column_config.CheckboxColumn(
+                    "☝️", help="Añadir esta habitación a la reserva", default=False
+                ),
+                "code": st.column_config.TextColumn("Hab.", disabled=True),
+                "type": st.column_config.TextColumn("Tipo", disabled=True),
+                "capacity_adults": st.column_config.NumberColumn("Adultos", disabled=True),
+                "capacity_children": st.column_config.NumberColumn("Niños", disabled=True),
+                "amenities": st.column_config.TextColumn("Amenities", disabled=True),
+            }
+        )
+        
+        # Recupera ids seleccionados a partir del índice
+        selected_room_ids = [idx for idx, row in edited.iterrows() if row["☝️"]]
+        
     promo2 = st.text_input("Código promo R", placeholder="Opcional")
     submit = st.form_submit_button("Crear y Confirmar")
 

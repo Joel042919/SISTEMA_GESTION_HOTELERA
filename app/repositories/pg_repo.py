@@ -1,5 +1,6 @@
 from app.core.db import PgSession
 from typing import Optional,List,Tuple
+import pandas as pd
 
 
 
@@ -72,3 +73,30 @@ class PgRepo:
             )
             rows = db.cur.fetchall() or []
             return [(r[0], r[1]) for r in rows]
+    
+    def list_rooms_available(self, property_id:str)->pd.DataFrame:
+        """
+        Devuelve lista [(id,code,type,capacity_adults,capacity_children,amenities)] de las habitaciones disponibles
+        """
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT r.id::text                AS id,
+                       r.code                    AS code,
+                       rt.name                   AS type,
+                       rt.capacity_adults        AS capacity_adults,
+                       rt.capacity_children      AS capacity_children,
+                       (rt.amenities)::text      AS amenities
+                FROM pms.rooms r
+                INNER JOIN pms.room_types rt ON r.room_type_id = rt.id
+                WHERE r.status = 'available'
+                  AND r.property_id = %s
+                ORDER BY rt.name, r.code;
+                """,
+                (property_id,)
+            )
+            rows = db.cur.fetchall() or []
+            df = pd.DataFrame(rows, columns=[
+                "id","code","type","capacity_adults","capacity_children","amenities"
+            ])
+            return df
