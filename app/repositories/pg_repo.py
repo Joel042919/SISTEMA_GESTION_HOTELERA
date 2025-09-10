@@ -1,7 +1,7 @@
 from app.core.db import PgSession
 from typing import Optional,List,Tuple
 import pandas as pd
-
+from decimal import Decimal
 
 
 class PgRepo:
@@ -16,10 +16,10 @@ class PgRepo:
             }
 
 
-    def create_reservation(self, property_id:str, guest_id:str, room_type_id:str, dates:List[str], promo:Optional[str], user_id:str)->str:
+    def create_reservation(self, property_id:str, guest_id:str, dates:List[str],selected_room_ids:List[str], promo:Optional[str], user_id:str)->tuple[str,Decimal]:
         with PgSession() as db:
-            row = db.call('pms.sp_create_reservation', (property_id, guest_id, room_type_id, dates, promo, user_id))
-            return row[0]
+            row = db.call('pms.sp_create_reservation_with_rooms', (property_id, guest_id, dates,selected_room_ids, promo, user_id))
+            return row[0],row[1]
 
     def create_guests(self,full_name:str,dni:str,phone:str,email:Optional[str],preferences:Optional[dict])->tuple[str,str]:
         with PgSession() as db:
@@ -86,21 +86,31 @@ class PgRepo:
         with PgSession() as db:
             db.cur.execute(
                 """
-                SELECT r.id::text                AS id,
-                       r.code                    AS code,
-                       rt.name                   AS type,
-                       rt.capacity_adults        AS capacity_adults,
-                       rt.capacity_children      AS capacity_children,
-                       (rt.amenities)::text      AS amenities
+                SELECT
+                    r.id::text             AS id,
+                    r.code                 AS code,
+                    rt.name                AS type,
+                    rt.capacity_adults     AS capacity_adults,
+                    rt.capacity_children   AS capacity_children,
+                    rt.amenities::text     AS amenities
                 FROM pms.rooms r
-                INNER JOIN pms.room_types rt ON r.room_type_id = rt.id
-                inner join pms.reservation_rooms rero on rero.room_id=r.id 
-                inner join pms.reservations res on res.id=rero.reservation_id
-                WHERE r.status = 'available'
-                  AND r.property_id = %s and not (res.end_date>=%s and res.start_date<=%s)
+                JOIN pms.room_types rt
+                ON rt.id = r.room_type_id
+                WHERE r.property_id = %s
+                AND r.status <> 'out_of_order'  -- o = 'available' si así lo quieres
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM pms.reservation_rooms rr
+                    JOIN pms.reservations res ON res.id = rr.reservation_id
+                    WHERE rr.room_id = r.id
+                    AND res.status IN ('pending','confirmed','checked_in')
+                    -- SOLAPE: startA < endB AND endA > startB
+                    AND res.start_date < %s   -- endDate
+                    AND res.end_date   > %s   -- startDate
+                )
                 ORDER BY rt.name, r.code;
                 """,
-                (property_id,startDate,endDate)
+                (property_id,endDate,startDate)
             )
             rows = db.cur.fetchall() or []
             df = pd.DataFrame(rows, columns=[

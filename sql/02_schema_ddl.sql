@@ -250,3 +250,14 @@ CREATE TABLE cash_closures (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(property_id, date)
 );
+
+ALTER TABLE pms.reservations
+  ALTER COLUMN room_type_id DROP NOT NULL;
+
+-- Quita la unicidad por reservation_id
+ALTER TABLE pms.reservation_rooms DROP CONSTRAINT IF EXISTS reservation_rooms_reservation_id_key;
+
+-- Asegura que no se repita la misma habitación dentro de la misma reserva
+ALTER TABLE pms.reservation_rooms
+  ADD CONSTRAINT uq_reservation_room UNIQUE (reservation_id, room_id);
+

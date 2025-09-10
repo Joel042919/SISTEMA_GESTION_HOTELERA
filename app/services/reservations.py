@@ -13,8 +13,8 @@ class ReservationsService:
 
 
     @policy_check('reservations.create')
-    def create(self, property_id, guest_id, room_type_id, dates, promo, user_id):
-        return self.repo.create_reservation(property_id, guest_id, room_type_id, dates, promo, user_id)
+    def create(self, property_id, guest_id, dates,selected_room_ids, promo, user_id):
+        return self.repo.create_reservation(property_id, guest_id, dates,selected_room_ids, promo, user_id)
 
 
     @policy_check('reservations.assign_room')

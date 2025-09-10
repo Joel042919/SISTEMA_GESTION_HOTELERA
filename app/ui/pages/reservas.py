@@ -7,6 +7,7 @@ from app.auth.session import current_user
 from app.services.rooms import RoomsService
 from app.services.guestsHotel import GuestsHotelService
 import pandas as pd
+import time
 
 u = current_user()
 if not u:
@@ -23,9 +24,10 @@ svc_guest = GuestsHotelService(repo)
 def verificar_rango_fecha(startDate:str,endDate:str):
     return (endDate-startDate).days <=0
 
-def set_guest(guest_id:str,full_name:str):
+def set_guest(guest_id:str,full_name:str,dni:str):
     st.session_state["guest_id"] = guest_id
     st.session_state["guest_name"] = full_name
+    st.session_state["guest_dni"] = dni
 
 
 if "guest_id" not in st.session_state:
@@ -157,15 +159,22 @@ try:
         if st.button("Buscar"):
             try:
                 results = svc_guest.search_guest_by_dni(dni)
-                st.write(results)
+                #idGuestSearch,fullNameSearch,dniSearch = results
+                #st.session_state["guest_id"]=idGuestSearch
+                #st.write("Nada" if not results else "TOdO")
                 if not results:
                     st.write("Sin resultados.")
                 else:
                     idGuestSearch,fullNameSearch,dniSearch = results
+                    st.text_input("ID",value=idGuestSearch)
+                    st.text_input('NAME',value=fullNameSearch)
+                    set_guest(idGuestSearch, fullNameSearch,dniSearch)
+                    time.sleep(2)
+                    st.rerun()
                     if st.button("Seleccionar", key="sel_btn_pop"):
-                        set_guest(idGuestSearch, fullNameSearch)
+                        #idGuestSearch,fullNameSearch,dniSearch = results
+                        #st.session_state["guest_id"]=idGuestSearch
                         close_dni_dialog()
-                        st.rerun()
                         
                         
             except Exception as e:
@@ -226,6 +235,8 @@ except Exception:
             
 #Mostrar huesped seleccionado (si hay)
 if st.session_state["guest_id"]:
+    st.text_input(label='Full Name',value=st.session_state["guest_name"])
+    st.text_input(label="DNI",value=st.session_state["guest_dni"])
     short = st.session_state["guest_id"][:8]
     st.success(f"Huésped seleccionado: {st.session_state['guest_name']}  ·  UUID: {short}…")
 else:
@@ -241,10 +252,10 @@ with st.form("create_form"):
     #room_type_id2 = rt_options[label2]
     
     promo2 = st.text_input("Código promo R", placeholder="Opcional")
-    submit = st.form_submit_button("Crear y Confirmar",disabled=(not st.session_state["guest_id"]))
+    #submit = st.form_submit_button("Crear y Confirmar",disabled=(not st.session_state["guest_id"]))
+    submit = st.form_submit_button("Crear y Confirmar")
     
         
-
 
 if submit and st.session_state["guest_id"]:
     try:
@@ -252,15 +263,25 @@ if submit and st.session_state["guest_id"]:
             st.error("Rango de fechas inválido")
         else:
             dates = [ (start2 + timedelta(days=i)).isoformat() for i in range((end2-start2).days) ]
-            rid = svc.create(
-                u['property_id'], 
-                st.session_state["guest_id"], 
-                "", 
-                dates, 
-                promo2 or None, 
+            #rid = svc.create(
+            #    u['property_id'], 
+            #    st.session_state["guest_id"], 
+            #    "", 
+            #    dates, 
+            #    promo2 or None, 
+            #    u['id']
+            #)
+            #st.success(f"Reserva creada: {rid}")
+            res_id, total = svc.create(
+                u['property_id'],
+                st.session_state["guest_id"],
+                dates,     # p_dates
+                selected_room_ids,                         # p_room_ids
+                promo2 or None,                            # p_promo_code
                 u['id']
             )
-            st.success(f"Reserva creada: {rid}")
+            
+            st.success(f"Reserva creada: {res_id}, monto total {total}")
             if selected_room_ids:
                 st.caption(f"Habitaciones seleccionadas: {', '.join(map(str, selected_room_ids))}")
     except Exception as e:
