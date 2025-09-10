@@ -22,8 +22,8 @@ $$;
 
 -- Estancia activa (checked_in) para check-out
 CREATE OR REPLACE FUNCTION pms.fn_find_checkedin_reservation_by_dni(p_property UUID, p_dni TEXT)
-RETURNS UUID LANGUAGE sql AS $$
-SELECT res.id
+RETURNS text LANGUAGE sql AS $$
+SELECT res.id::text
 FROM pms.reservations res
 JOIN pms.guests g ON g.id = res.guest_id
 WHERE res.property_id = p_property
@@ -221,3 +221,58 @@ BEGIN
   RETURN QUERY SELECT v_inv, v_fin.balance_due, 'checked_in';
 END;
 $$;
+
+
+--CHECKOUT
+CREATE OR REPLACE FUNCTION pms.sp_check_out(
+  p_reservation UUID,
+  p_method TEXT,
+  p_received_by UUID
+) RETURNS TABLE(invoice_number TEXT, paid_amount NUMERIC, new_status TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_fin RECORD;
+  v_inv TEXT;
+  v_currency TEXT;
+  v_property UUID;
+BEGIN
+  SELECT * INTO v_fin FROM pms.fn_reservation_financials(p_reservation);
+  IF v_fin IS NULL THEN RAISE EXCEPTION 'RES_NOT_FOUND'; END IF;
+
+  IF (SELECT status FROM pms.reservations WHERE id = p_reservation) <> 'checked_in' THEN
+    RAISE EXCEPTION 'RESERVATION_NOT_CHECKED_IN';
+  END IF;
+
+  v_currency := v_fin.currency;
+  v_property := (SELECT property_id FROM pms.reservations WHERE id=p_reservation);
+
+  -- cobrar saldo si hay
+  IF v_fin.balance_due > 0 THEN
+    INSERT INTO pms.payments(reservation_id, method, amount, currency, received_by)
+    VALUES (p_reservation, p_method, v_fin.balance_due, v_currency, p_received_by);
+
+    v_inv := pms.next_invoice_number(v_property);
+    INSERT INTO pms.invoices(reservation_id, number, amount, tax_amount, currency)
+    VALUES (p_reservation, v_inv, v_fin.balance_due, 0, v_currency);
+  ELSE
+    v_inv := NULL;
+  END IF;
+
+  -- liberar/ensuciar habitaciones y crear task HK
+  UPDATE pms.rooms r
+  SET status = 'dirty'
+  WHERE r.id IN (SELECT room_id FROM pms.reservation_rooms WHERE reservation_id = p_reservation);
+
+  INSERT INTO pms.housekeeping_tasks(property_id, room_id, scheduled_date, status, checklist)
+  SELECT v_property, rr.room_id, CURRENT_DATE, 'pending', '[]'::jsonb
+  FROM pms.reservation_rooms rr
+  WHERE rr.reservation_id = p_reservation
+  ON CONFLICT DO NOTHING;
+
+  -- status
+  UPDATE pms.reservations SET status='checked_out' WHERE id=p_reservation;
+
+  RETURN QUERY SELECT v_inv, COALESCE(v_fin.balance_due,0), 'checked_out';
+END;
+$$;
+

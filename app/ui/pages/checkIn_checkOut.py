@@ -96,29 +96,27 @@ with tab_in:
     if st.session_state["checkin_res_id"]:
         render_checkin_detail(st.session_state["checkin_res_id"])
 
-# ---------- CHECK-OUT ----------
-def render_checkout_detail(res_id: str):
-    cab = _fetch_one("""
-        SELECT r.id::text AS reservation_id, g.full_name, g.dni,
-               r.start_date, r.end_date, r.status
-        FROM pms.reservations r
-        JOIN pms.guests g ON g.id = r.guest_id
-        WHERE r.id=%s
-    """, (res_id,))
-    st.write(f"**Huésped:** {cab['full_name']}  |  **DNI:** {cab['dni']}")
-    st.write(f"**Estadía:** {cab['start_date']} → {cab['end_date']}  |  **Estado:** {cab['status']}")
 
-    items2 = _fetch_all("""
-        SELECT room_code, room_type, subtotal_room AS price, currency
-        FROM pms.fn_reservation_room_breakdown(%s)
-        ORDER BY room_code
-    """, (res_id,))
+#=======================================
+# ---------- CHECK-OUT ----------
+#=======================================
+
+def render_checkout_detail(res_id: str):
+    cab = repo_reservation.search_guest_reservation(res_id)
+    st.text_input(label='Huésped', value=cab['full_name'], disabled=True)
+    st.text_input(label='DNI', value=cab['dni'], disabled=True)
+    st.text_input(label='Estadía', value=f"{cab['start_date']} → {cab['end_date']}", disabled=True)
+    st.text_input(label='Estado', value=cab['status'], disabled=True)
+
+    items2 = repo_reservation.get_rooms_reservations(res_id)
+    
     if items2:
         df2 = pd.DataFrame(items2)
         df2['price_fmt'] = df2.apply(lambda r: f"{r['currency']} {r['price']:.2f}", axis=1)
         st.dataframe(df2[['room_code','room_type','price_fmt']], hide_index=True, use_container_width=True)
 
-    fin2 = _fetch_one("SELECT * FROM pms.fn_reservation_financials(%s)", (res_id,))
+    fin2 = repo_reservation.get_reservation_financials(res_id)
+    
     if fin2:
         c1,c2,c3,c4 = st.columns(4)
         c1.metric("Total reserva", f"{fin2['currency']} {fin2['base_total']:.2f}")
@@ -133,7 +131,7 @@ def render_checkout_detail(res_id: str):
             method2 = st.selectbox("Método de pago", ["cash","card","yape","plin","transfer"], key="checkout_method")
             do_checkout = st.form_submit_button("Cobrar saldo y Check-out", type="primary")
         if do_checkout:
-            out2 = _fetch_one("SELECT * FROM pms.sp_check_out(%s,%s,%s)", (res_id, method2, user_id))
+            out2 = repo_reservation.check_out(res_id, method2, user_id)
             if out2:
                 st.success(f"Check-out OK. Factura final: {out2['invoice_number'] or '—'}. "
                            f"Cobrado: {fin2['currency']} {out2['paid_amount']:.2f}")
@@ -146,13 +144,13 @@ with tab_out:
         dni2 = st.text_input("DNI del huésped", key="dni_out")
     with c2:
         if st.button("Buscar reserva con check-in"):
-            res = _fetch_one("SELECT pms.fn_find_checkedin_reservation_by_dni(%s,%s) AS res_id", (prop_id, dni2))
-            if not res or not res.get('res_id'):
+            res = repo.find_checkedin_reservation_by_dni(prop_id, dni2)
+            if not res:
                 st.session_state["checkout_res_id"] = None
                 st.warning("No se encontró reserva en estado CHECKED_IN para este DNI.")
             else:
-                st.session_state["checkout_res_id"] = res['res_id']
-                st.success(f"Reserva encontrada: {res['res_id']}")
+                st.session_state["checkout_res_id"] = res
+                st.success(f"Reserva encontrada: {res}")
 
     if st.session_state["checkout_res_id"]:
         render_checkout_detail(st.session_state["checkout_res_id"])

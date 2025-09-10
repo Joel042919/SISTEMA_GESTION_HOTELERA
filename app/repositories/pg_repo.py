@@ -190,6 +190,34 @@ class PgRepo:
                 return None
             row = rows[0]
             cols = [desc[0] for desc in db.cur.description]
+            return dict(zip(cols,row))
+        
+    def check_out(self, reservation_id:str,pay_method:str,user_id:str)->Optional[dict]:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                select * from pms.sp_check_out(%s,%s,%s)
+                """
+                ,(reservation_id,pay_method,user_id)
+            )
+            rows = db.cur.fetchall()
+            if not rows:
+                return None
+            row = rows[0]
+            cols = [desc[0] for desc in db.cur.description]
             return dict(zip(cols,row)) 
+        
+    def find_checkedin_reservation_by_dni(self,property_id:str,dni:str)->str:
+        with PgSession() as db:
+            db.cur.execute(
+                """SELECT pms.fn_find_checkedin_reservation_by_dni(%s,%s) AS res_id"""
+                , (property_id, dni)
+            )
+            row = db.cur.fetchone()
+            if row and row[0]:
+                return row[0]   # res_id como str
+            return None
+            
+        
        
 

@@ -42,3 +42,11 @@ class ReservationsService:
     def check_in(self, reservation_id:str,pay_method:str,user_id:str):
         return self.repo.check_in(reservation_id,pay_method,user_id)
     
+    @policy_check('reservations.check_out')
+    def check_out(self, reservation_id:str,pay_method:str,user_id:str):
+        return self.repo.check_out(reservation_id,pay_method,user_id)
+    
+    @policy_check('reservations.get_check_in')
+    def find_checkedin_reservation_by_dni(self, property_id:str,dni:str):
+        return self.repo.find_checkedin_reservation_by_dni(property_id,dni)
+    
