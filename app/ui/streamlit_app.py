@@ -23,7 +23,7 @@ _warm_db()
 if SESSION_USER_KEY not in st.session_state:
     st.sidebar.header("Iniciar sesión")
     email = st.sidebar.text_input("Correo", value="admin@demo.local")
-    password = st.sidebar.text_input("Contraseña", type="password")
+    password = st.sidebar.text_input("Contraseña", type="password",value="admin123")
     if st.sidebar.button("Entrar", use_container_width=True):
         import psycopg
         with psycopg.connect(POOL.conninfo) as conn:

@@ -1,5 +1,5 @@
 from app.core.db import PgSession
-from typing import Optional,List,Tuple
+from typing import Optional,List,Tuple,Dict
 import pandas as pd
 from decimal import Decimal
 
@@ -122,3 +122,70 @@ class PgRepo:
         with PgSession() as db:
             row = db.call('pms.search_guest_by_dni',(dni,))
             return row
+    
+    def search_reservation(self, propiedadId:str,dniGuest:str)->str:
+        with PgSession() as db:
+            rows = db.call('pms.fn_find_pending_reservation_by_dni',(propiedadId,dniGuest))
+            return rows[0]
+        
+    def search_guest_reservation(self, reservation_id:str)->Optional[dict]:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT r.id::text AS reservation_id, g.full_name, g.dni,
+                       r.start_date, r.end_date, r.status
+                FROM pms.reservations r
+                JOIN pms.guests g ON g.id = r.guest_id
+                WHERE r.id=%s
+                """
+                ,(reservation_id,)
+            )
+            row = db.cur.fetchone()
+            if row is None:
+                return None
+            cols = [desc[0] for desc in db.cur.description]
+            return dict(zip(cols, row))
+    
+    def get_rooms_reservations(self, reservation_id:str)->List[Dict]:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT room_code, room_type, subtotal_room AS price, currency
+                FROM pms.fn_reservation_room_breakdown(%s)
+                ORDER BY room_code
+                """
+                ,(reservation_id,)
+            )
+            
+            rows = db.cur.fetchall()
+            cols = [desc[0] for desc in db.cur.description]  # nombres de columnas
+            return [dict(zip(cols, r)) for r in rows]
+    
+    
+    def get_reservation_financials(self, reservation_id:str)->Optional[dict]:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT * from pms.fn_reservation_financials(%s)
+                """
+                ,(reservation_id,)
+            )
+            rows = db.cur.fetchall()
+            if not rows:
+                return None
+            row = rows[0]
+            cols = [desc[0] for desc in db.cur.description]
+            return dict(zip(cols,row))
+        
+    def check_in(self, reservation_id:str,pay_method:str,user_id:str)->Optional[dict]:
+        with PgSession() as db:
+            rows = db.call(
+                'pms.sp_check_in',(reservation_id,pay_method,user_id)
+            )
+            if not rows:
+                return None
+            row = rows[0]
+            cols = [desc[0] for desc in db.cur.description]
+            return dict(zip(cols,row)) 
+       
+

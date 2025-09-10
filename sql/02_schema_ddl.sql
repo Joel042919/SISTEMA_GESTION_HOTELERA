@@ -260,4 +260,3 @@ ALTER TABLE pms.reservation_rooms DROP CONSTRAINT IF EXISTS reservation_rooms_re
 -- Asegura que no se repita la misma habitación dentro de la misma reserva
 ALTER TABLE pms.reservation_rooms
   ADD CONSTRAINT uq_reservation_room UNIQUE (reservation_id, room_id);
-
