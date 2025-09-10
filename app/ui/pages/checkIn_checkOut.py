@@ -37,6 +37,7 @@ def _fetch_all(sql, params=()):
         rows = db.query(sql, params)
         return [dict(r) for r in rows] if rows else []
 
+
 def render_checkin_detail(res_id: str):
     """Dibuja toda la sección de detalle del check-in para un res_id dado."""
     # 2) Cabecera
