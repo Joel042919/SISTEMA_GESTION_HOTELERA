@@ -217,6 +217,129 @@ class PgRepo:
             if row and row[0]:
                 return row[0]   # res_id como str
             return None
+        
+    def list_roles(self) -> List[Tuple[str, str]]:
+        """
+        Devuelve [(role_id, role_name)]
+        """
+        with PgSession() as db:
+            db.cur.execute("SELECT id::text, name FROM pms.roles ORDER BY name;")
+            return [(r[0], r[1]) for r in (db.cur.fetchall() or [])]
+    
+    
+    def list_users_with_roles(self, property_id: str) -> List[Dict]:
+        """
+        Lista usuarios y sus roles (agregados) para la propiedad dada.
+        """
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT
+                u.id::text AS id,
+                u.email,
+                u.full_name,
+                u.is_active,
+                COALESCE(
+                    array_agg(DISTINCT r.name) FILTER (WHERE r.id IS NOT NULL),
+                    '{}'
+                ) AS roles
+                FROM pms.users u
+                LEFT JOIN pms.user_roles ur ON ur.user_id = u.id AND ur.property_id = %s
+                LEFT JOIN pms.roles r ON r.id = ur.role_id
+                GROUP BY u.id, u.email, u.full_name, u.is_active
+                ORDER BY u.full_name, u.email;
+                """,
+                (property_id,)
+            )
+            rows = db.cur.fetchall() or []
+            cols = [d[0] for d in db.cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+
+    def get_user_with_roles(self, user_id: str, property_id: str) -> Optional[Dict]:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                SELECT
+                  u.id::text AS id,
+                  u.email,
+                  u.full_name,
+                  u.is_active,
+                  COALESCE(array_agg(DISTINCT r.id::text)
+                    FILTER (WHERE r.id IS NOT NULL), '{}') AS role_ids
+                FROM pms.users u
+                LEFT JOIN pms.user_roles ur ON ur.user_id = u.id AND ur.property_id = %s
+                LEFT JOIN pms.roles r ON r.id = ur.role_id
+                WHERE u.id = %s
+                GROUP BY u.id, u.email, u.full_name, u.is_active
+                """,
+                (property_id, user_id)
+            )
+            row = db.cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in db.cur.description]
+            return dict(zip(cols, row))
+        
+    def create_user(self, email: str, full_name: str, password_hash: str, is_active: bool=True) -> str:
+        with PgSession() as db:
+            db.cur.execute(
+                """
+                INSERT INTO pms.users(email, full_name, password_hash, is_active)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id::text;
+                """,
+                (email, full_name, password_hash, is_active)
+            )
+            return db.cur.fetchone()[0]
+
+    def update_user(self, user_id: str, email: str, full_name: str,
+                    password_hash: Optional[str], is_active: bool) -> None:
+        with PgSession() as db:
+            if password_hash:
+                db.cur.execute(
+                    """
+                    UPDATE pms.users
+                    SET email=%s, full_name=%s, password_hash=%s, is_active=%s
+                    WHERE id=%s
+                    """,
+                    (email, full_name, password_hash, is_active, user_id)
+                )
+            else:
+                db.cur.execute(
+                    """
+                    UPDATE pms.users
+                    SET email=%s, full_name=%s, is_active=%s
+                    WHERE id=%s
+                    """,
+                    (email, full_name, is_active, user_id)
+                )
+
+    def set_user_active(self, user_id: str, is_active: bool) -> None:
+        with PgSession() as db:
+            db.cur.execute(
+                "UPDATE pms.users SET is_active=%s WHERE id=%s",
+                (is_active, user_id)
+            )
+            
+    def replace_user_roles(self, user_id: str, role_ids: List[str], property_id: str) -> None:
+        with PgSession() as db:
+            # limpia asignaciones actuales para la propiedad
+            db.cur.execute(
+                "DELETE FROM pms.user_roles WHERE user_id=%s AND property_id=%s",
+                (user_id, property_id)
+            )
+            if role_ids:
+                db.cur.executemany(
+                    """
+                    INSERT INTO pms.user_roles(user_id, role_id, property_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    [(user_id, rid, property_id) for rid in role_ids]
+                )
+
+
+
             
         
        
