@@ -179,9 +179,13 @@ class PgRepo:
         
     def check_in(self, reservation_id:str,pay_method:str,user_id:str)->Optional[dict]:
         with PgSession() as db:
-            rows = db.call(
-                'pms.sp_check_in',(reservation_id,pay_method,user_id)
+            db.cur.execute(
+                """
+                select * from pms.sp_check_in(%s,%s,%s)
+                """
+                ,(reservation_id,pay_method,user_id)
             )
+            rows = db.cur.fetchall()
             if not rows:
                 return None
             row = rows[0]
