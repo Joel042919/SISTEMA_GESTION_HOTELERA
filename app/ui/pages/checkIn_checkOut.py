@@ -110,10 +110,17 @@ with tab_in:
 
 def render_checkout_detail(res_id: str):
     cab = repo_reservation.search_guest_reservation(res_id)
+<<<<<<< HEAD
     st.text_input(label='Huésped guests', value=cab['full_name'], disabled=True)
     st.text_input(label='DNI guests', value=cab['dni'], disabled=True)
     st.text_input(label='Estadía guests', value=f"{cab['start_date']} → {cab['end_date']}", disabled=True)
     st.text_input(label='Estado guests', value=cab['status'], disabled=True)
+=======
+    st.text_input(label='Huésped', value=cab['full_name'], disabled=True)
+    st.text_input(label='DNI', value=cab['dni'], disabled=True)
+    st.text_input(label='Estadía', value=f"{cab['start_date']} → {cab['end_date']}", disabled=True)
+    st.text_input(label='Estado', value=cab['status'], disabled=True)
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
     items2 = repo_reservation.get_rooms_reservations(res_id)
     

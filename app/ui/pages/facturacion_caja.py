@@ -4,11 +4,21 @@ from decimal import Decimal
 from datetime import date
 from app.repositories.pg_repo import PgRepo
 from app.auth.session import current_user
+<<<<<<< HEAD
 from app.core.db import POOL
+=======
+from app.ui.layout import hide_native_multipage_nav, inject_sidebar_style, guard_login, render_sidebar_nav
+
+hide_native_multipage_nav()   # oculta menú multipágina nativo (evita links antes del login)
+inject_sidebar_style()        # estilos bonitos del sidebar/nav
+u = guard_login()             # exige sesión (si no hay, detiene la página)
+render_sidebar_nav()          # pinta los links con emojis en el sidebar
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
 u = current_user()
 if not u:
     st.stop()
+
 
 st.header("Facturación y Caja")
 

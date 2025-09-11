@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import altair as alt
 import streamlit as st
+<<<<<<< HEAD
 from datetime import date, timedelta
 
 # Infra de tu proyecto
@@ -15,12 +16,20 @@ except Exception:
     # Fallback por si no existe
     SESSION_USER_KEY = "user"
     _get_user = lambda: st.session_state.get(SESSION_USER_KEY)
+=======
+from datetime import date
+from app.services.reports import ReportsService
+from app.repositories.pg_repo import PgRepo
+from app.auth.session import current_user
+from app.ui.layout import hide_native_multipage_nav, inject_sidebar_style, guard_login, render_sidebar_nav
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
 # ----------------------------
 # Configuración visual general
 # ----------------------------
 st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
 
+<<<<<<< HEAD
 # Paleta rápida (chips/etiquetas)
 PILL_STYLES = {
     "success": ("#ECFDF5", "#065F46"),
@@ -29,6 +38,12 @@ PILL_STYLES = {
     "danger":  ("#FEF2F2", "#991B1B"),
     "neutral": ("#F3F4F6", "#374151"),
 }
+=======
+hide_native_multipage_nav()   # oculta menú multipágina nativo (evita links antes del login)
+inject_sidebar_style()        # estilos bonitos del sidebar/nav
+u = guard_login()             # exige sesión (si no hay, detiene la página)
+render_sidebar_nav()          # pinta los links con emojis en el sidebar
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
 def pill(text: str, kind: str = "neutral"):
     bg, fg = PILL_STYLES.get(kind, PILL_STYLES["neutral"])
@@ -185,6 +200,7 @@ checkouts       = int(g("checkouts", 0))
 ingresos_hoy = room_revenue + extra_revenue
 
 k1, k2, k3, k4 = st.columns(4)
+<<<<<<< HEAD
 with k1:
     st.metric("Ocupación", f"{occupancy:.1f}%")
 with k2:
@@ -193,6 +209,12 @@ with k3:
     st.metric("RevPAR", f"S/ {revpar:,.2f}")
 with k4:
     st.metric("Ingresos Hoy", f"S/ {ingresos_hoy:,.2f}")
+=======
+k1.metric("Ocupación", f"{report['occupancy_pct']}%", help="% habitaciones ocupadas hoy")
+k2.metric("Ingresos del día", f"{report['revenue']} PEN")
+k3.metric("ADR", f"{report['adr']}")
+k4.metric("RevPAR", f"{report['revpar']}")
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
 k5, k6, k7, k8 = st.columns(4)
 with k5:

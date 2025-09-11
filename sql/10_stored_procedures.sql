@@ -14,7 +14,7 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO pms.audit_log(entity, entity_id, action, diff_json, user_id)
+  INSERT INTO audit_log(entity, entity_id, action, diff_json, user_id)
   VALUES (p_entity, p_entity_id, p_action, p_diff, p_user);
 END;
 $$;
@@ -204,17 +204,13 @@ DECLARE
   v_overlap    int;
   v_old_status pms.rooms.status%TYPE;
 BEGIN
-  SELECT * INTO v_res FROM pms.reservations WHERE id = p_res FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'RES_NOT_FOUND' USING ERRCODE='P0001'; END IF;
+  SELECT * INTO v_res
+  FROM pms.reservations
+  WHERE id = p_res
+  FOR UPDATE;
 
-  SELECT * INTO v_room FROM pms.rooms WHERE id = p_room FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'ROOM_NOT_FOUND' USING ERRCODE='P0001'; END IF;
-
-  IF v_res.property_id <> v_room.property_id THEN
-    RAISE EXCEPTION 'ROOM_PROPERTY_MISMATCH' USING ERRCODE='P0001';
-  END IF;
-  IF v_res.room_type_id IS NOT NULL AND v_room.room_type_id <> v_res.room_type_id THEN
-    RAISE EXCEPTION 'ROOM_TYPE_MISMATCH' USING ERRCODE='P0001';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'RES_NOT_FOUND' USING ERRCODE='P0001';
   END IF;
 
   -- solape real con OTRAS reservas (excluye la misma) y rango semi-abierto
@@ -231,20 +227,18 @@ BEGIN
     RAISE EXCEPTION 'ROOM_OVERLAP' USING ERRCODE='P0001';
   END IF;
 
-  INSERT INTO pms.reservation_rooms (reservation_id, room_id)
+  INSERT INTO pms.reservation_rooms(reservation_id, room_id)
   VALUES (p_res, p_room)
-  ON CONFLICT ON CONSTRAINT uq_reservation_room
-  DO NOTHING;
+  ON CONFLICT (reservation_id) DO UPDATE SET room_id = EXCLUDED.room_id;
 
-  v_old_status := v_room.status;
-  UPDATE pms.rooms SET status = 'occupied'::pms.room_status WHERE id = p_room;
+  UPDATE pms.rooms SET status = 'occupied' WHERE id = p_room;
 
-  INSERT INTO pms.room_status_history (room_id, old_status, new_status, changed_by)
-  VALUES (p_room, v_old_status, 'occupied'::pms.room_status, p_user);
+  INSERT INTO pms.room_status_history(room_id, old_status, new_status, changed_by)
+  SELECT id, NULL, 'occupied', p_user FROM rooms WHERE id = p_room;
 
   PERFORM pms.sp_audit_write(
-    'reservation_rooms', p_res, 'assign',
-    jsonb_build_object('room_id', p_room),
+    'reservation_rooms', p_room, 'assign',
+    jsonb_build_object('reservation', p_res),
     p_user
   );
 END;
@@ -347,12 +341,8 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  IF p_amount <= 0 THEN
-    RAISE EXCEPTION 'INVALID_AMOUNT' USING ERRCODE='P0001';
-  END IF;
-
   INSERT INTO pms.payments(reservation_id, method, amount, currency, received_by)
-  VALUES (p_res, upper(p_method), p_amount, upper(p_currency), p_user);
+  VALUES (p_res, p_method, p_amount, p_currency, p_user);
 
   PERFORM pms.sp_audit_write(
     'payments', p_res, 'register',

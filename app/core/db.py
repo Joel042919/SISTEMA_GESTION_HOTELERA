@@ -18,6 +18,7 @@ class PgSession:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+<<<<<<< HEAD
         try:
             if exc:
                 self.conn.rollback()
@@ -26,6 +27,14 @@ class PgSession:
         finally:    
             self.cur.close()
             POOL.putconn(self.conn)
+=======
+        if exc:
+            self.conn.rollback()
+        else:
+            self.conn.commit()
+        self.cur.close()
+        POOL.putconn(self.conn)
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
 
     def call(self, fn: str, params: tuple = ()): # devuelve first row
         placeholders = ', '.join(['%s']*len(params))
@@ -35,6 +44,19 @@ class PgSession:
         except Exception:
             return None
 
+<<<<<<< HEAD
     def call_void(self, fn: str, params: tuple = ()): # para VOID
         placeholders = ', '.join(['%s']*len(params))
         self.cur.execute(f"SELECT {fn}({placeholders});", params)
+=======
+    def call(self, fn: str, params: tuple = ()): # devuelve first row
+        self.cur.execute(f"SELECT * FROM {fn}({', '.join(['%s']*len(params))});", params)
+        try:
+            return self.cur.fetchone()
+        except Exception:
+            return None
+
+
+    def call_void(self, fn: str, params: tuple = ()): # para VOID
+        self.cur.execute(f"SELECT {fn}({', '.join(['%s']*len(params))});", params)
+>>>>>>> d1211c539bdfdfa1792f6acac0f7a72d1438d3ff
