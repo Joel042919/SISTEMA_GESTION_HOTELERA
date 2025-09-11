@@ -1,33 +1,51 @@
+# app/ui/pages/habitaciones.py
 import streamlit as st
-import psycopg
-from app.core.db import POOL
-from app.services.rooms import RoomsService
+import pandas as pd
 from app.repositories.pg_repo import PgRepo
 from app.auth.session import current_user
-
+from app.core.db import POOL
 
 u = current_user()
-if not u: st.stop()
-svc = RoomsService(PgRepo())
+if not u:
+    st.stop()
 
+st.header("Habitaciones")
 
-st.header("Habitaciones — Estado en tiempo real")
+@st.cache_data(ttl=60)
+def _load_rooms(property_id:str):
+    with POOL.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    r.id::text              AS room_id,
+                    r.code                  AS code,
+                    rt.name                 AS room_type,
+                    rt.capacity_adults      AS capacity_adults,
+                    rt.capacity_children    AS capacity_children,
+                    r.status::text          AS status
+                    FROM pms.rooms r
+                    JOIN pms.room_types rt ON rt.id = r.room_type_id
+                    WHERE r.property_id = %s
+                    ORDER BY r.code;
 
+            """, (property_id,))
+            rows = cur.fetchall()
+            return pd.DataFrame(rows, columns=["id","code","type","adults","children","status"])
+df = _load_rooms(u['property_id'])
+st.dataframe(df, use_container_width=True, hide_index=True)
 
-with psycopg.connect(POOL.conninfo) as conn:
-    df = None
+st.subheader("Cambiar estado")
+room_id = st.selectbox("Habitación", df["id"].tolist(), format_func=lambda rid: df.loc[df["id"]==rid, "code"].iloc[0] if not df.empty else rid)
+new_status = st.selectbox("Nuevo estado", ["available","occupied","maintenance"])
+if st.button("Aplicar"):
     try:
-        df = conn.execute("SELECT id, code, status FROM pms.rooms WHERE property_id=%s ORDER BY code", (u['property_id'],)).fetchall()
+        with POOL.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pms.sp_set_room_status(%s, %s::pms.room_status, %s);",
+                            (room_id, new_status, u['id']))
+        st.success("Estado actualizado.")
+        st.cache_data.clear()
+        st.rerun()
     except Exception as e:
-        st.error(str(e))
-
-
-if df:
-    for r in df:
-        c1, c2, c3, c4 = st.columns([1,1,1,2])
-        c1.write(r[1])
-        c2.write(r[2])
-        new_status = c3.selectbox("Nuevo estado", ['available','occupied','dirty','cleaning','maintenance','out_of_order'], key=r[0])
-        if c4.button("Actualizar", key=f"btn_{r[0]}"):
-            svc.set_status(r[0], new_status, u['id'])
-            st.rerun()
+        st.error("No se pudo actualizar el estado.")
+        st.exception(e)

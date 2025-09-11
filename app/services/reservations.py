@@ -13,10 +13,40 @@ class ReservationsService:
 
 
     @policy_check('reservations.create')
-    def create(self, property_id, guest_id, room_type_id, dates, promo, user_id):
-        return self.repo.create_reservation(property_id, guest_id, room_type_id, dates, promo, user_id)
+    def create(self, property_id, guest_id, dates,selected_room_ids, promo, user_id):
+        return self.repo.create_reservation(property_id, guest_id, dates,selected_room_ids, promo, user_id)
 
 
     @policy_check('reservations.assign_room')
     def assign_room(self, reservation_id, room_id, user_id):
         self.repo.assign_room(reservation_id, room_id, user_id)
+        
+        
+    @policy_check('reservations.search_reservation_by_dni_guest')
+    def search_reservation(self, propiedad_id:str, dniGuest:str):
+        return self.repo.search_reservation(propiedad_id,dniGuest)
+    
+    @policy_check('reservations.search_guest_data')
+    def search_guest_reservation(self, reservation_id:str):
+        return self.repo.search_guest_reservation(reservation_id)
+    
+    @policy_check('reservations.get_rooms')
+    def get_rooms_reservations(self, reservation_id:str):
+        return self.repo.get_rooms_reservations(reservation_id)
+    
+    @policy_check('reservations.get_financials')
+    def get_reservation_financials(self, reservation_id:str):
+        return self.repo.get_reservation_financials(reservation_id)
+    
+    @policy_check('reservations.check_in')
+    def check_in(self, reservation_id:str,pay_method:str,user_id:str):
+        return self.repo.check_in(reservation_id,pay_method,user_id)
+    
+    @policy_check('reservations.check_out')
+    def check_out(self, reservation_id:str,pay_method:str,user_id:str):
+        return self.repo.check_out(reservation_id,pay_method,user_id)
+    
+    @policy_check('reservations.get_check_in')
+    def find_checkedin_reservation_by_dni(self, property_id:str,dni:str):
+        return self.repo.find_checkedin_reservation_by_dni(property_id,dni)
+    

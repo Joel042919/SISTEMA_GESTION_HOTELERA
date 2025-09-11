@@ -14,7 +14,7 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO audit_log(entity, entity_id, action, diff_json, user_id)
+  INSERT INTO pms.audit_log(entity, entity_id, action, diff_json, user_id)
   VALUES (p_entity, p_entity_id, p_action, p_diff, p_user);
 END;
 $$;
@@ -61,8 +61,8 @@ BEGIN
 
   SELECT r.base_rate, r.currency, r.weekend_multiplier, t.rate
   INTO v_rate
-  FROM rates r
-  JOIN tax_codes t ON t.code = r.tax_code
+  FROM pms.rates r
+  JOIN pms.tax_codes t ON t.code = r.tax_code
   WHERE r.property_id = p_property
     AND r.room_type_id = p_room_type
     AND r.active
@@ -80,7 +80,7 @@ BEGIN
   IF p_promo IS NOT NULL THEN
     SELECT COALESCE(percent_off,0), COALESCE(amount_off,0)
     INTO v_promo_pct, v_promo_amt
-    FROM promos
+    FROM pms.promos
     WHERE property_id = p_property
       AND code = p_promo
       AND active
@@ -96,7 +96,7 @@ BEGIN
     -- Temporada
     SELECT COALESCE(MAX(multiplier), 1.0)
     INTO v_multiplier
-    FROM rate_seasons
+    FROM pms.rate_seasons
     WHERE property_id = p_property
       AND v_date BETWEEN start_date AND end_date;
 
@@ -157,10 +157,10 @@ BEGIN
   END IF;
 
   SELECT currency INTO v_currency
-  FROM properties
+  FROM pms.properties
   WHERE id = p_property;
 
-  INSERT INTO reservations(
+  INSERT INTO pms.reservations(
     property_id, guest_id, room_type_id, start_date, end_date,
     status, promo_code, currency, created_by
   )
@@ -170,7 +170,7 @@ BEGIN
   )
   RETURNING id INTO v_res;
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'reservations', v_res, 'create',
     jsonb_build_object('start',v_start,'end',v_end,'promo',p_promo),
     p_user
@@ -179,9 +179,9 @@ BEGIN
   -- Total
   SELECT grand_total
   INTO v_tot
-  FROM sp_quote_price(p_property, p_room_type, v_start, v_end, 1, p_promo);
+  FROM pms.sp_quote_price(p_property, p_room_type, v_start, v_end, 1, p_promo);
 
-  UPDATE reservations SET total_amount = v_tot WHERE id = v_res;
+  UPDATE pms.reservations SET total_amount = v_tot WHERE id = v_res;
 
   RETURN v_res;
 END;
@@ -190,56 +190,69 @@ $$;
 -- =========================================
 -- Asignar habitación
 -- =========================================
-CREATE OR REPLACE FUNCTION sp_assign_room(
-  p_res UUID,
-  p_room UUID,
-  p_user UUID
+CREATE OR REPLACE FUNCTION pms.sp_assign_room(
+  p_res  uuid,
+  p_room uuid,
+  p_user uuid
 )
-RETURNS VOID
+RETURNS void
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_res reservations%ROWTYPE;
-  v_overlap INT;
+  v_res        pms.reservations%ROWTYPE;
+  v_room       pms.rooms%ROWTYPE;
+  v_overlap    int;
+  v_old_status pms.rooms.status%TYPE;
 BEGIN
-  SELECT * INTO v_res
-  FROM reservations
-  WHERE id = p_res
-  FOR UPDATE;
+  SELECT * INTO v_res FROM pms.reservations WHERE id = p_res FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RES_NOT_FOUND' USING ERRCODE='P0001'; END IF;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'RES_NOT_FOUND' USING ERRCODE='P0001';
+  SELECT * INTO v_room FROM pms.rooms WHERE id = p_room FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ROOM_NOT_FOUND' USING ERRCODE='P0001'; END IF;
+
+  IF v_res.property_id <> v_room.property_id THEN
+    RAISE EXCEPTION 'ROOM_PROPERTY_MISMATCH' USING ERRCODE='P0001';
+  END IF;
+  IF v_res.room_type_id IS NOT NULL AND v_room.room_type_id <> v_res.room_type_id THEN
+    RAISE EXCEPTION 'ROOM_TYPE_MISMATCH' USING ERRCODE='P0001';
   END IF;
 
-  -- Verificar solapamiento
+  -- solape real con OTRAS reservas (excluye la misma) y rango semi-abierto
   SELECT COUNT(*) INTO v_overlap
-  FROM reservation_rooms rr
-  JOIN reservations r ON r.id = rr.reservation_id
+  FROM pms.reservation_rooms rr
+  JOIN pms.reservations r ON r.id = rr.reservation_id
   WHERE rr.room_id = p_room
     AND r.status IN ('pending','confirmed','checked_in')
-    AND daterange(r.start_date, r.end_date, '[]')
-        && daterange(v_res.start_date, v_res.end_date, '[]');
+    AND r.id <> p_res
+    AND daterange(r.start_date, r.end_date, '[)')
+        && daterange(v_res.start_date, v_res.end_date, '[)');
 
   IF v_overlap > 0 THEN
     RAISE EXCEPTION 'ROOM_OVERLAP' USING ERRCODE='P0001';
   END IF;
 
-  INSERT INTO reservation_rooms(reservation_id, room_id)
+  INSERT INTO pms.reservation_rooms (reservation_id, room_id)
   VALUES (p_res, p_room)
-  ON CONFLICT (reservation_id) DO UPDATE SET room_id = EXCLUDED.room_id;
+  ON CONFLICT ON CONSTRAINT uq_reservation_room
+  DO NOTHING;
 
-  UPDATE rooms SET status = 'occupied' WHERE id = p_room;
+  v_old_status := v_room.status;
+  UPDATE pms.rooms SET status = 'occupied'::pms.room_status WHERE id = p_room;
 
-  INSERT INTO room_status_history(room_id, old_status, new_status, changed_by)
-  SELECT id, NULL, 'occupied', p_user FROM rooms WHERE id = p_room;
+  INSERT INTO pms.room_status_history (room_id, old_status, new_status, changed_by)
+  VALUES (p_room, v_old_status, 'occupied'::pms.room_status, p_user);
 
-  PERFORM sp_audit_write(
-    'reservation_rooms', p_room, 'assign',
-    jsonb_build_object('reservation', p_res),
+  PERFORM pms.sp_audit_write(
+    'reservation_rooms', p_res, 'assign',
+    jsonb_build_object('room_id', p_room),
     p_user
   );
 END;
 $$;
+
+ALTER FUNCTION pms.sp_assign_room(uuid, uuid, uuid)
+  SET search_path TO pms, public;
+
 
 -- =========================================
 -- Cancelar reserva
@@ -255,17 +268,17 @@ AS $$
 DECLARE
   v_room UUID;
 BEGIN
-  UPDATE reservations SET status='canceled' WHERE id = p_res;
+  UPDATE pms.reservations SET status='canceled' WHERE id = p_res;
 
   SELECT room_id INTO v_room
-  FROM reservation_rooms
+  FROM pms.reservation_rooms
   WHERE reservation_id = p_res;
 
   IF v_room IS NOT NULL THEN
-    UPDATE rooms SET status='available' WHERE id = v_room;
+    UPDATE pms.rooms SET status='available' WHERE id = v_room;
   END IF;
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'reservations', p_res, 'cancel',
     jsonb_build_object('reason', p_reason),
     p_user
@@ -285,9 +298,9 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  UPDATE reservations SET status='checked_in' WHERE id = p_res;
+  UPDATE pms.reservations SET status='checked_in' WHERE id = p_res;
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'reservations', p_res, 'checkin',
     p_doc,
     p_user
@@ -309,10 +322,10 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO charges(reservation_id, concept, amount, tax_code, posted_by)
+  INSERT INTO pms.charges(reservation_id, concept, amount, tax_code, posted_by)
   VALUES (p_res, p_concept, p_amount, p_tax_code, p_user);
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'charges', p_res, 'post_charge',
     jsonb_build_object('concept', p_concept, 'amount', p_amount),
     p_user
@@ -323,27 +336,36 @@ $$;
 -- =========================================
 -- Pagos
 -- =========================================
-CREATE OR REPLACE FUNCTION sp_register_payment(
-  p_res UUID,
-  p_method TEXT,
-  p_amount NUMERIC,
-  p_currency TEXT,
-  p_user UUID
+CREATE OR REPLACE FUNCTION pms.sp_register_payment( 
+  p_res      uuid,
+  p_method   text,
+  p_amount   numeric,
+  p_currency text,
+  p_user     uuid
 )
-RETURNS VOID
+RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  INSERT INTO payments(reservation_id, method, amount, currency, received_by)
-  VALUES (p_res, p_method, p_amount, p_currency, p_user);
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'INVALID_AMOUNT' USING ERRCODE='P0001';
+  END IF;
 
-  PERFORM sp_audit_write(
+  INSERT INTO pms.payments(reservation_id, method, amount, currency, received_by)
+  VALUES (p_res, upper(p_method), p_amount, upper(p_currency), p_user);
+
+  PERFORM pms.sp_audit_write(
     'payments', p_res, 'register',
-    jsonb_build_object('method', p_method, 'amount', p_amount),
+    jsonb_build_object('method', upper(p_method), 'amount', p_amount, 'currency', upper(p_currency)),
     p_user
   );
 END;
 $$;
+
+-- Asegura el search_path de la función (opcional pero recomendable)
+ALTER FUNCTION pms.sp_register_payment(uuid, text, numeric, text, uuid)
+  SET search_path TO pms, public;
+
 
 -- =========================================
 -- Checkout (emite invoice)
@@ -364,27 +386,27 @@ DECLARE
 BEGIN
   SELECT total_amount, currency
   INTO v_total, v_curr
-  FROM reservations
+  FROM pms.reservations
   WHERE id = p_res;
 
   -- Recalcula con cargos del periodo (demo simple: suma de charges)
   SELECT COALESCE(SUM(amount),0)
   INTO v_total
-  FROM charges
+  FROM pms.charges
   WHERE reservation_id = p_res;
 
   -- IGV asociado a la tarifa del room_type activo
   SELECT ROUND(v_total * (t.rate/100.0), 2)
   INTO v_tax
-  FROM reservations r
-  JOIN rates ra ON ra.property_id = r.property_id
+  FROM pms.reservations r
+  JOIN pms.rates ra ON ra.property_id = r.property_id
                AND ra.room_type_id = r.room_type_id
                AND ra.active
-  JOIN tax_codes t ON t.code = ra.tax_code
+  JOIN pms.tax_codes t ON t.code = ra.tax_code
   WHERE r.id = p_res
   LIMIT 1;
 
-  INSERT INTO invoices(reservation_id, number, amount, tax_amount, currency)
+  INSERT INTO pms.invoices(reservation_id, number, amount, tax_amount, currency)
   VALUES (
     p_res,
     CONCAT('F-', substr(replace(cast(gen_random_uuid() as text),'-',''),1,8)),
@@ -394,9 +416,9 @@ BEGIN
   )
   RETURNING id INTO v_invoice;
 
-  UPDATE reservations SET status='checked_out' WHERE id = p_res;
+  UPDATE pms.reservations SET status='checked_out' WHERE id = p_res;
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'invoices', v_invoice, 'issue',
     jsonb_build_object('extra', p_extra),
     p_user
@@ -421,16 +443,16 @@ DECLARE
   v_old room_status;
 BEGIN
   SELECT status INTO v_old
-  FROM rooms
+  FROM pms.rooms
   WHERE id = p_room
   FOR UPDATE;
 
-  UPDATE rooms SET status = p_status WHERE id = p_room;
+  UPDATE pms.rooms SET status = p_status WHERE id = p_room;
 
-  INSERT INTO room_status_history(room_id, old_status, new_status, changed_by)
+  INSERT INTO pms.room_status_history(room_id, old_status, new_status, changed_by)
   VALUES (p_room, v_old, p_status, p_user);
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'rooms', p_room, 'set_status',
     jsonb_build_object('from', v_old, 'to', p_status),
     p_user
@@ -456,23 +478,23 @@ DECLARE
 BEGIN
   SELECT COALESCE(SUM(amount),0)
   INTO v_pay
-  FROM payments pa
-  JOIN reservations r ON r.id = pa.reservation_id
+  FROM pms.payments pa
+  JOIN pms.reservations r ON r.id = pa.reservation_id
   WHERE r.property_id = p_property
     AND DATE(pa.paid_at) = p_date;
 
   SELECT COALESCE(SUM(amount),0)
   INTO v_inv
-  FROM invoices i
-  JOIN reservations r ON r.id = i.reservation_id
+  FROM pms.invoices i
+  JOIN pms.reservations r ON r.id = i.reservation_id
   WHERE r.property_id = p_property
     AND DATE(i.issued_at) = p_date;
 
-  INSERT INTO cash_closures(property_id, date, closed_by, total_payments, total_invoices)
+  INSERT INTO pms.cash_closures(property_id, date, closed_by, total_payments, total_invoices)
   VALUES (p_property, p_date, p_user, v_pay, v_inv)
   RETURNING id INTO v_id;
 
-  PERFORM sp_audit_write(
+  PERFORM pms.sp_audit_write(
     'cash_closures', v_id, 'close',
     jsonb_build_object('date', p_date),
     p_user
@@ -507,12 +529,12 @@ DECLARE
   v_adr NUMERIC;
 BEGIN
   SELECT COUNT(*) INTO v_rt
-  FROM rooms
+  FROM pms.rooms
   WHERE property_id = p_property;
 
   SELECT COUNT(*) INTO v_ro
-  FROM reservations r
-  JOIN reservation_rooms rr ON rr.reservation_id = r.id
+  FROM pms.reservations r
+  JOIN pms.reservation_rooms rr ON rr.reservation_id = r.id
   WHERE r.property_id = p_property
     AND p_date >= r.start_date
     AND p_date < r.end_date
@@ -520,8 +542,8 @@ BEGIN
 
   SELECT COALESCE(SUM(amount),0)
   INTO v_rev
-  FROM charges c
-  JOIN reservations r ON r.id = c.reservation_id
+  FROM pms.charges c
+  JOIN pms.reservations r ON r.id = c.reservation_id
   WHERE r.property_id = p_property
     AND DATE(c.posted_at) = p_date;
 
